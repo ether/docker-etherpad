@@ -1,36 +1,34 @@
 #!/usr/bin/with-contenv bash
 # shellcheck shell=bash
 #
-# On first run, seed /config/settings.json from the bundled template and
-# switch the dev-only "dirty" DB to a sqlite file in /config.  Symlink
-# /app/etherpad-lite/var into /config so installed_plugins.json and any
-# runtime state persist across container upgrades.  Then optionally
-# install plugins listed in /config/plugins.txt.
+# On first run, seed /config/settings.json from the bundled template,
+# redirect /app/etherpad-lite/var into /config so installed_plugins.json
+# and runtime state persist, pre-seed installed_plugins.json (so
+# Etherpad's startup checkForMigration doesn't shell out to `pnpm ls`
+# from a directory abc can't write to), then optionally install plugins
+# listed in /config/plugins.txt.
 
 APP_DIR="${EP_DIR:-/app/etherpad-lite}"
 SETTINGS="/config/settings.json"
 TEMPLATE="${APP_DIR}/settings.json.docker"
 [ -f "${TEMPLATE}" ] || TEMPLATE="${APP_DIR}/settings.json.template"
 
-# 1. Seed settings.json on first launch.
+# 1. Seed settings.json on first launch.  The template uses Etherpad's
+#    native ${VAR:default} substitution syntax, so DB selection / IP /
+#    port etc. are driven by env vars set in svc-etherpad/run, NOT by
+#    rewriting this file.  An admin editing /config/settings.json to a
+#    literal value (e.g. "dbType": "postgres") will override the env
+#    default cleanly.
 if [ ! -f "${SETTINGS}" ]; then
     echo "[etherpad] bootstrapping ${SETTINGS} from ${TEMPLATE}"
     cp "${TEMPLATE}" "${SETTINGS}"
-    # dirty is flagged dev-only by the upstream template; switch to sqlite
-    # backed by a single file in the persistent /config volume.  The
-    # rusty-store-kv native module that backs sqlite ships prebuilt with
-    # ueberdb2 — no extra build deps required at runtime.
-    sed -i \
-        -e 's|"dbType" *: *"dirty"|"dbType": "sqlite"|' \
-        -e 's|"filename" *: *"var/dirty.db"|"filename": "/config/etherpad.db"|' \
-        "${SETTINGS}"
 fi
 
 # 2. Redirect the app's var/ into /config so installed_plugins.json,
 #    sessionkey, APIKEY etc. survive container recreation.  The Etherpad
-#    plugin installer uses __dirname to locate its registry, so we cannot
-#    point it at /config via env vars alone — a symlink under the app
-#    tree is the only thing the runtime honours.
+#    plugin installer uses __dirname to locate its registry, so we
+#    cannot point it at /config via env vars alone — a symlink under
+#    the app tree is the only thing the runtime honours.
 mkdir -p /config/var
 if [ -L "${APP_DIR}/var" ]; then
     rm -f "${APP_DIR}/var"
@@ -42,7 +40,23 @@ elif [ -e "${APP_DIR}/var" ]; then
 fi
 ln -s /config/var "${APP_DIR}/var"
 
-# 3. Install any user-requested plugins.  /config/plugins.txt holds one
+# 3. Pre-seed installed_plugins.json so Etherpad's checkForMigration
+#    skips its `pnpm ls --long --json --depth=0 --no-production` call
+#    on boot.  pnpm needs to write a tmp file under ${APP_DIR}, which
+#    is root-owned by the image build, and abc cannot write there.
+#    The seed only writes the bundled core plugin; the admin UI adds
+#    real entries when users install plugins at runtime.
+INSTALLED="/config/var/installed_plugins.json"
+if [ ! -f "${INSTALLED}" ]; then
+    VERSION=$(node -p "require('${APP_DIR}/src/package.json').version" 2>/dev/null \
+              || node -p "require('${APP_DIR}/package.json').version" 2>/dev/null \
+              || echo "0.0.0")
+    cat > "${INSTALLED}" <<EOF
+{"plugins":[{"name":"ep_etherpad-lite","version":"${VERSION}"}]}
+EOF
+fi
+
+# 4. Install any user-requested plugins.  /config/plugins.txt holds one
 #    plugin name per line; lines starting with '#' or blank are skipped.
 #    pnpm wants HOME writable for its store, and s6-setuidgid leaves
 #    HOME at /root, so pass an abc-writable HOME via env.
@@ -61,7 +75,7 @@ if [ -f /config/plugins.txt ]; then
     done < /config/plugins.txt
 fi
 
-# 4. Final ownership pass.  /config/* and the plugin-writable dirs under
+# 5. Final ownership pass.  /config/* and the plugin-writable dirs under
 #    /app/etherpad-lite need to be abc-owned so Etherpad can write to
 #    them.  plugin_packages and node_modules are root-owned by the build
 #    but the admin UI installs new plugins into them at runtime.
@@ -74,10 +88,7 @@ for dir in \
     fi
 done
 
-# Without an explicit exit 0, the script's return code is whatever the
-# last command returned.  When src/plugin_packages doesn't exist yet
-# (fresh install — it's created at runtime by the admin UI on first
-# plugin install) the `[ -d ... ]` test inside the loop returns 1 and
-# becomes the script's exit code, which s6-rc reads as init failure and
-# refuses to start svc-etherpad.  Force success here.
+# Force success — see prior commit notes; the optional-dir loop above
+# can leave a non-zero exit status if the last directory tested doesn't
+# exist on a fresh install, which s6-rc would read as init failure.
 exit 0
