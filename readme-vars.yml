@@ -1,0 +1,50 @@
+---
+
+# project information
+project_name: etherpad
+project_url: "https://etherpad.org"
+project_logo: "https://raw.githubusercontent.com/ether/etherpad/develop/src/static/img/brand.svg"
+project_blurb: "[{{ project_name|capitalize }}]({{ project_url }}) is a real-time collaborative document editor. Multiple people can edit the same pad simultaneously; every change is synchronised instantly and colour-coded per author. Self-hosted, open source, and fully under your control — meeting notes, brainstorming, shared writing, lightweight knowledge capture. Ships with a built-in admin panel and an ecosystem of 250+ plugins."
+project_lsio_github_repo_url: "https://github.com/linuxserver/docker-{{ project_name }}"
+project_categories: "Productivity,Collaboration"
+# supported architectures
+available_architectures:
+  - {arch: "{{ arch_x86_64 }}", tag: "amd64-latest"}
+  - {arch: "{{ arch_arm64 }}", tag: "arm64v8-latest"}
+# development version
+development_versions: false
+# container parameters
+common_param_env_vars_enabled: true
+param_container_name: "{{ project_name }}"
+param_usage_include_vols: true
+param_volumes:
+  - {vol_path: "/config", vol_host_path: "/path/to/{{ project_name }}/config", desc: "Persistent config, sqlite pad store, installed plugins."}
+param_usage_include_ports: true
+param_ports:
+  - {external_port: "9001", internal_port: "9001", port_desc: "Etherpad WebUI"}
+readonly_supported: false
+# application setup block
+app_setup_block_enabled: true
+app_setup_block: |
+  Access the WebUI at `http://<your-ip>:9001`.
+
+  ### First-run config
+
+  On first launch the container seeds `/config/settings.json` from the bundled `settings.json.docker` template, switching the DB backend from the dev-only `dirty` store to a sqlite file at `/config/etherpad.db`. Edit `/config/settings.json` to customise; restart the container to apply changes.
+
+  ### Persistence
+
+  Everything that needs to survive a container recreate lives under `/config`:
+
+  - `/config/settings.json` — main config
+  - `/config/etherpad.db` — sqlite pad store
+  - `/config/var/` — `installed_plugins.json`, sessionkey, APIKEY (symlinked to `/app/etherpad-lite/var` inside the container)
+  - `/config/plugins.txt` — optional list of plugins (one name per line) installed automatically on boot
+
+  ### Admin panel
+
+  Set `ADMIN_PASSWORD` to enable the admin UI at `/admin/`. The admin user is named `admin`. The plugin manager, settings editor and pad browser all live under that path.
+
+  ### External database
+
+  To use Postgres or MySQL/MariaDB instead of sqlite, edit `/config/settings.json` and set `dbType` to `postgres` or `mysql` with the corresponding `dbSettings`. The official documentation at https://docs.etherpad.org covers the available backends.

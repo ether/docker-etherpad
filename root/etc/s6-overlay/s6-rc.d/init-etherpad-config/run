@@ -1,0 +1,70 @@
+#!/usr/bin/with-contenv bash
+# shellcheck shell=bash
+#
+# On first run, seed /config/settings.json from the bundled template and
+# switch the dev-only "dirty" DB to a sqlite file in /config.  Symlink
+# /app/etherpad-lite/var into /config so installed_plugins.json and any
+# runtime state persist across container upgrades.  Then optionally
+# install plugins listed in /config/plugins.txt.
+
+APP_DIR="${EP_DIR:-/app/etherpad-lite}"
+SETTINGS="/config/settings.json"
+TEMPLATE="${APP_DIR}/settings.json.docker"
+[ -f "${TEMPLATE}" ] || TEMPLATE="${APP_DIR}/settings.json.template"
+
+# 1. Seed settings.json on first launch.
+if [ ! -f "${SETTINGS}" ]; then
+    echo "[etherpad] bootstrapping ${SETTINGS} from ${TEMPLATE}"
+    cp "${TEMPLATE}" "${SETTINGS}"
+    # dirty is flagged dev-only by the upstream template; switch to sqlite
+    # backed by a single file in the persistent /config volume.  The
+    # rusty-store-kv native module that backs sqlite ships prebuilt with
+    # ueberdb2 — no extra build deps required at runtime.
+    sed -i \
+        -e 's|"dbType" *: *"dirty"|"dbType": "sqlite"|' \
+        -e 's|"filename" *: *"var/dirty.db"|"filename": "/config/etherpad.db"|' \
+        "${SETTINGS}"
+fi
+
+# 2. Redirect the app's var/ into /config so installed_plugins.json,
+#    sessionkey, APIKEY etc. survive container recreation.  The Etherpad
+#    plugin installer uses __dirname to locate its registry, so we cannot
+#    point it at /config via env vars alone — a symlink under the app
+#    tree is the only thing the runtime honours.
+mkdir -p /config/var
+if [ -L "${APP_DIR}/var" ]; then
+    rm -f "${APP_DIR}/var"
+elif [ -e "${APP_DIR}/var" ]; then
+    # Carry forward anything the build left in var/ (e.g. APIKEY.txt) the
+    # first time around, then replace with the symlink.
+    cp -a "${APP_DIR}/var/." /config/var/ 2>/dev/null || true
+    rm -rf "${APP_DIR}/var"
+fi
+ln -s /config/var "${APP_DIR}/var"
+
+# 3. Install any user-requested plugins.  /config/plugins.txt holds one
+#    plugin name per line; lines starting with '#' or blank are skipped.
+if [ -f /config/plugins.txt ]; then
+    cd "${APP_DIR}" || exit 1
+    while IFS= read -r plugin; do
+        plugin="${plugin%%#*}"
+        plugin="$(echo "${plugin}" | xargs)"
+        [ -z "${plugin}" ] && continue
+        if [ ! -d "${APP_DIR}/src/node_modules/${plugin}" ]; then
+            echo "[etherpad] installing plugin ${plugin}"
+            s6-setuidgid abc pnpm run plugins i "${plugin}" || \
+                echo "[etherpad] WARNING: failed to install ${plugin}"
+        fi
+    done < /config/plugins.txt
+fi
+
+# 4. Final ownership pass.  /config/* and the plugin-writable dirs under
+#    /app/etherpad-lite need to be abc-owned so Etherpad can write to
+#    them.  plugin_packages and node_modules are root-owned by the build
+#    but the admin UI installs new plugins into them at runtime.
+lsiown -R abc:abc /config
+for dir in \
+    "${APP_DIR}/src/node_modules" \
+    "${APP_DIR}/src/plugin_packages"; do
+    [ -d "${dir}" ] && lsiown -R abc:abc "${dir}"
+done

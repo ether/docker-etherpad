@@ -1,0 +1,9 @@
+#!/usr/bin/with-contenv bash
+# shellcheck shell=bash
+
+cd "${EP_DIR:-/app/etherpad-lite}" || exit 1
+
+exec \
+    s6-notifyoncheck -d -n 300 -w 1000 -c "nc -z localhost 9001" \
+    s6-setuidgid abc \
+    pnpm run prod -- --settings /config/settings.json

@@ -1,0 +1,9 @@
+.git
+.github
+.gitignore
+.dockerignore
+*.md
+LICENSE
+Jenkinsfile
+jenkins-vars.yml
+readme-vars.yml
