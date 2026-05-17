@@ -48,16 +48,25 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Build steps push per-arch tags only. The manifest step then
+      # composes the base tags (latest, vX.Y.Z) so each arch gets its
+      # own suffix correctly even when there are multiple base tags.
       - name: Compute tags
         id: tags
         run: |
           repo="ghcr.io/ether/etherpad-lsio"
           ver="${{ steps.ver.outputs.etherpad_version }}"
-          tags="${repo}:${ver}"
+          bases="${repo}:${ver}"
           if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            tags="${tags},${repo}:latest"
+            bases="${bases} ${repo}:latest"
           fi
-          echo "tags=${tags}" >> "$GITHUB_OUTPUT"
+          tags_amd64=$(printf "%s-amd64," ${bases} | sed 's/,$//')
+          tags_arm64=$(printf "%s-arm64," ${bases} | sed 's/,$//')
+          {
+            echo "bases=${bases}"
+            echo "amd64=${tags_amd64}"
+            echo "arm64=${tags_arm64}"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Build amd64
         uses: docker/build-push-action@v7
@@ -70,7 +79,7 @@ jobs:
             VERSION=${{ steps.ver.outputs.etherpad_version }}
             BUILD_DATE=${{ github.event.repository.updated_at }}
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.tags.outputs.tags }}-amd64
+          tags: ${{ steps.tags.outputs.amd64 }}
 
       - name: Build arm64
         uses: docker/build-push-action@v7
@@ -83,12 +92,12 @@ jobs:
             VERSION=${{ steps.ver.outputs.etherpad_version }}
             BUILD_DATE=${{ github.event.repository.updated_at }}
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.tags.outputs.tags }}-arm64
+          tags: ${{ steps.tags.outputs.arm64 }}
 
       - name: Create multi-arch manifest
         if: github.event_name != 'pull_request'
         run: |
-          for tag in $(echo "${{ steps.tags.outputs.tags }}" | tr ',' ' '); do
-            docker buildx imagetools create -t "${tag}" \
-              "${tag}-amd64" "${tag}-arm64"
+          for base in ${{ steps.tags.outputs.bases }}; do
+            docker buildx imagetools create -t "${base}" \
+              "${base}-amd64" "${base}-arm64"
           done
