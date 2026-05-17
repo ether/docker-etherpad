@@ -66,5 +66,15 @@ lsiown -R abc:abc /config
 for dir in \
     "${APP_DIR}/src/node_modules" \
     "${APP_DIR}/src/plugin_packages"; do
-    [ -d "${dir}" ] && lsiown -R abc:abc "${dir}"
+    if [ -d "${dir}" ]; then
+        lsiown -R abc:abc "${dir}"
+    fi
 done
+
+# Without an explicit exit 0, the script's return code is whatever the
+# last command returned.  When src/plugin_packages doesn't exist yet
+# (fresh install — it's created at runtime by the admin UI on first
+# plugin install) the `[ -d ... ]` test inside the loop returns 1 and
+# becomes the script's exit code, which s6-rc reads as init failure and
+# refuses to start svc-etherpad.  Force success here.
+exit 0
