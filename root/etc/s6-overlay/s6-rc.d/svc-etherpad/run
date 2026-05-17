@@ -23,6 +23,13 @@ export HOME=/config
 export DB_TYPE="${DB_TYPE:-sqlite}"
 export DB_FILENAME="${DB_FILENAME:-/config/etherpad.db}"
 
+# Default to apikey auth so the HTTP API works out of the box (Etherpad
+# only auto-generates APIKEY.txt when authenticationMethod === 'apikey';
+# the template default is 'sso' which never writes the file and leaves
+# every /api/1/* request returning "no or wrong API Key"). Users who
+# actually want SSO can set AUTHENTICATION_METHOD=sso via env.
+export AUTHENTICATION_METHOD="${AUTHENTICATION_METHOD:-apikey}"
+
 cd "${APP_DIR}/src" || exit 1
 
 # s6-notifyoncheck was here originally (matching the thelounge template
