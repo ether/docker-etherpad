@@ -56,6 +56,27 @@ if [ ! -f "${INSTALLED}" ]; then
 EOF
 fi
 
+# 3a. Etherpad writes APIKEY.txt and SESSIONKEY.txt directly under
+#     settings.root (= ${APP_DIR}) on first boot. That directory is
+#     root-owned by the image build, so abc can't write — API requests
+#     fail with "no or wrong API Key" and admin pad-session resets
+#     break. Symlink both keyfiles into /config so they're abc-writable
+#     AND persist across container recreation.
+for keyfile in APIKEY.txt SESSIONKEY.txt; do
+    target="/config/${keyfile}"
+    link="${APP_DIR}/${keyfile}"
+    if [ ! -L "${link}" ]; then
+        if [ -f "${link}" ] && [ ! -f "${target}" ]; then
+            cp "${link}" "${target}"
+        fi
+        rm -f "${link}"
+        [ -f "${target}" ] || touch "${target}"
+        chown abc:abc "${target}"
+        chmod 0640 "${target}"
+        ln -s "${target}" "${link}"
+    fi
+done
+
 # 4. Install any user-requested plugins.  /config/plugins.txt holds one
 #    plugin name per line; lines starting with '#' or blank are skipped.
 #    pnpm wants HOME writable for its store, and s6-setuidgid leaves
