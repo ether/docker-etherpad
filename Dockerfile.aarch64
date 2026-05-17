@@ -29,7 +29,7 @@ RUN \
     nodejs \
     npm && \
   echo "**** install pnpm ****" && \
-  npm install -g pnpm@10.33.0 && \
+  npm install -g pnpm@11.1.2 && \
   echo "**** download etherpad ****" && \
   if [ -z ${ETHERPAD_VERSION+x} ]; then \
     ETHERPAD_VERSION=$(curl -sX GET "https://api.github.com/repos/ether/etherpad/releases/latest" | jq -r '. | .tag_name'); \

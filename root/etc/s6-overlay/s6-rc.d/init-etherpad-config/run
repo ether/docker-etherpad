@@ -44,6 +44,8 @@ ln -s /config/var "${APP_DIR}/var"
 
 # 3. Install any user-requested plugins.  /config/plugins.txt holds one
 #    plugin name per line; lines starting with '#' or blank are skipped.
+#    pnpm wants HOME writable for its store, and s6-setuidgid leaves
+#    HOME at /root, so pass an abc-writable HOME via env.
 if [ -f /config/plugins.txt ]; then
     cd "${APP_DIR}" || exit 1
     while IFS= read -r plugin; do
@@ -52,7 +54,8 @@ if [ -f /config/plugins.txt ]; then
         [ -z "${plugin}" ] && continue
         if [ ! -d "${APP_DIR}/src/node_modules/${plugin}" ]; then
             echo "[etherpad] installing plugin ${plugin}"
-            s6-setuidgid abc pnpm run plugins i "${plugin}" || \
+            s6-setuidgid abc env HOME=/config \
+                pnpm run plugins i "${plugin}" || \
                 echo "[etherpad] WARNING: failed to install ${plugin}"
         fi
     done < /config/plugins.txt
