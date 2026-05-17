@@ -62,17 +62,25 @@ fi
 #     fail with "no or wrong API Key" and admin pad-session resets
 #     break. Symlink both keyfiles into /config so they're abc-writable
 #     AND persist across container recreation.
+#
+#     IMPORTANT: do NOT pre-touch the /config target empty. Etherpad's
+#     generate-on-missing logic only fires when readFileSync throws —
+#     an empty file reads as the empty string, so Etherpad treats it
+#     as a valid (but blank) key and every API request fails with
+#     "no or wrong API Key". Leave the target absent so the first
+#     write through the symlink populates it correctly.
 for keyfile in APIKEY.txt SESSIONKEY.txt; do
     target="/config/${keyfile}"
     link="${APP_DIR}/${keyfile}"
     if [ ! -L "${link}" ]; then
-        if [ -f "${link}" ] && [ ! -f "${target}" ]; then
+        # Carry forward a non-empty build-time file (rare; the upstream
+        # image normally doesn't ship one) before we drop the symlink in.
+        if [ -s "${link}" ] && [ ! -s "${target}" ]; then
             cp "${link}" "${target}"
+            chown abc:abc "${target}"
+            chmod 0640 "${target}"
         fi
         rm -f "${link}"
-        [ -f "${target}" ] || touch "${target}"
-        chown abc:abc "${target}"
-        chmod 0640 "${target}"
         ln -s "${target}" "${link}"
     fi
 done
