@@ -25,7 +25,12 @@ export DB_FILENAME="${DB_FILENAME:-/config/etherpad.db}"
 
 cd "${APP_DIR}/src" || exit 1
 
+# s6-notifyoncheck was here originally (matching the thelounge template
+# we cloned from), but it exits "s6-supervise not running" before node
+# can start in our setup, killing svc-etherpad in a tight restart loop.
+# Drop it — s6 treats process-alive as readiness, which is what we want
+# for a long-running Etherpad daemon. Healthchecking happens at the
+# docker layer (HEALTHCHECK below in Dockerfile or compose-side).
 exec \
-    s6-notifyoncheck -d -n 300 -w 1000 -c "nc -z localhost 9001" \
     s6-setuidgid abc \
     node --import tsx node/server.ts --settings /config/settings.json
